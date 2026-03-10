@@ -1,0 +1,37 @@
+import pandas as pd
+import bisect
+
+MONTH_CODES = {
+    1: "F", 2: "G", 3: "H", 4: "J",
+    5: "K", 6: "M", 7: "N", 8: "Q",
+    9: "U", 10: "V", 11: "X", 12: "Z"
+}
+
+def expiration_to_ric(exp_date):
+    month_code = MONTH_CODES[exp_date.month]
+    year_code = str(exp_date.year)[-2:]
+    return f"VX{month_code}{year_code}"
+
+
+def get_vx_front_back(exp_df, date):
+    
+    date = pd.Timestamp(date)
+    
+    expirations = pd.to_datetime(exp_df["expiration_date"]).sort_values().values
+    
+    # first expiration strictly after date
+    idx = bisect.bisect_right(expirations, date)
+    
+    front_exp = pd.Timestamp(expirations[idx])
+    back_exp  = pd.Timestamp(expirations[idx + 1])
+    
+    front_ric = expiration_to_ric(front_exp)
+    back_ric  = expiration_to_ric(back_exp)
+    
+    days_to_expiry = (front_exp - date).days
+    
+    return {
+        "front_ric": front_ric,
+        "back_ric": back_ric,
+        "days_to_expiry": days_to_expiry
+    }
