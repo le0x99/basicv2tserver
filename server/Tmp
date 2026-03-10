@@ -1,0 +1,58 @@
+import pandas as pd
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar, USFederalHolidayCalendar,
+    nearest_workday, Holiday
+)
+import datetime
+import bisect
+
+# --- 1. Define CME US business day calendar (includes Juneteenth etc.) ---
+class CMEHolidayCalendar(AbstractHolidayCalendar):
+    rules = USFederalHolidayCalendar.rules + [
+        Holiday("Juneteenth", month=6, day=19, observance=nearest_workday),
+        Holiday("DayAfterThanksgiving", month=11, day=26, observance=nearest_workday),
+    ]
+
+bday_us = pd.offsets.CustomBusinessDay(calendar=CMEHolidayCalendar())
+
+# --- 2. Function to compute third Friday ---
+def third_friday(year, month):
+    d = datetime.date(year, month, 1)
+    w = d.weekday()  # Mon=0 … Sun=6
+    days_to_first_fri = (4 - w) % 7
+    first_fri = d + datetime.timedelta(days=days_to_first_fri)
+    third = first_fri + datetime.timedelta(days=14)
+    # shift to next business day if holiday
+    if third not in pd.date_range(third, third, freq=bday_us):
+        third = third + bday_us
+    return pd.Timestamp(third)
+
+# --- 3. Generate all ES quarterly expirations ---
+def generate_es_expirations(start_year=2015, end_year=2026):
+    expirations = []
+    for y in range(start_year, end_year + 1):
+        for m in (3, 6, 9, 12):
+            expirations.append(third_friday(y, m))
+    expirations.sort()
+    return pd.DataFrame({"expiration_date": expirations})
+
+# --- 4. Convert expiration to ES RIC ---
+MONTH_CODES = {3:"H", 6:"M", 9:"U", 12:"Z"}
+def es_exp_to_ric(exp):
+    return f"ES{MONTH_CODES[exp.month]}{str(exp.year)[-2:]}"
+
+# --- 5. Map any date to front ES RIC and days to expiry ---
+def get_es_front(exp_df, date):
+    date = pd.Timestamp(date)
+    exps = exp_df["expiration_date"].values
+    idx = bisect.bisect_right(exps, date)
+    front_exp = pd.Timestamp(exps[idx])
+    return {
+        "front_ric": es_exp_to_ric(front_exp),
+        "days_to_expiry": (front_exp - date).days
+    }
+
+# --- Example Usage ---
+es_exp_df = generate_es_expirations(2015, 2026)
+print(get_es_front(es_exp_df, "2025-06-10"))
+# Output: {'front_ric': 'ESM25', 'days_to_expiry': 10}
